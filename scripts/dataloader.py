@@ -26,38 +26,71 @@ class Dataloader(object):
         
         self.random_index = lambda: random.randint(0, len(self.dataset)-1)
 
-        self.input_shape = input_shape[:2]
+        self.input_shape = tuple(input_shape[:2])
         
     def load(self, index=None, use_random=True, use_aug=True):        
 
         # object index
         index = self.random_index() if index is None else index
-        # image index
+        # load target
+        image, bbox = self.process(index)
+        # load template
+        im_templ, bbox_templ = self.process(index)
+
+        # templ none object pixel set to zero
+        x1,y1,x2,y2 = bbox_templ
+        pad_x, pad_y = np.array([(x2-x1)/2, (y2-y1)/2], dtype=np.int32)
+        # pad_x, pad_y = 0, 0
+        
+        x1 = 0 if x1-pad_x < 0 else x1-pad_x
+        y1 = 0 if y1-pad_y < 0 else y1-pad_y
+        x2 = im_templ.shape[1] if x2+pad_x > im_templ.shape[1] else x2+pad_x
+        y2 = im_templ.shape[0] if y2+pad_y > im_templ.shape[1] else y2+pad_y
+
+        im_templ[:, 0:x1] = 0
+        im_templ[0:y1, 0:x1] = 0
+        im_templ[0:y1, :] = 0
+        im_templ[y2:, x2:] = 0
+        im_templ[:, x2:] = 0
+        im_templ[y2:, :] = 0
+
+        a = self.plot(image, bbox)
+        b = self.plot(im_templ, bbox_templ)
+        cv.imshow('img', np.hstack([a, b]))
+        # cv.waitKey(0)
+
+        print (bbox_templ)
+        return dict(templ=im_templ, templ_bbox=bbox_templ, image=image, bbox=bbox)
+
+
+    def process(self, index):
+        image, bbox = self.load_data(index)
+        image, bbox = self.resize_image_and_labels(image, bbox)        
+        image, bbox = self.color_space_argumentation(image, bbox)    
+        # image = self.normalize(image)
+        return image, bbox
+
+    def load_data(self, index):
         idx = random.randint(0, len(self.dataset[index])-1)
-        # image
         im_path = self.dataset[index][idx]['im_path']
         image = cv.imread(im_path, cv.IMREAD_COLOR)
         # bounding box
         bbox = self.dataset[index][idx]['bbox']
-
-        # reshape to network input_shape
-        image, bbox = self.resize_image_and_labels(image, bbox)        
-        image, bbox = self.color_space_argumentation(image, bbox)    
-        image = self.normalize(image)
-
-        self.plot(image, bbox)
-
-        return dict(input=image, bbox=bbox)
+        return image, bbox
 
     def plot(self, image, bbox):
-        # x1, x2 = np.min(bbox[:, 0]), np.max(bbox[:, 0])
-        # y1, y2 = np.min(bbox[:, 1]), np.max(bbox[:, 1])
-
+        # if len(bbox.shape) == 2:
+        #    x1, x2 = np.min(bbox[:, 0]), np.max(bbox[:, 0])
+        #    y1, y2 = np.min(bbox[:, 1]), np.max(bbox[:, 1])
+        #else:
         x1, y1, x2, y2 = bbox
-        cv.rectangle(image, (x1, y1), (x2, y2), (0, 255, 0), 3)
 
-        cv.imshow('image', image)
-        cv.waitKey(0)
+        im_plot = image.copy()
+        im_plot = cv.rectangle(im_plot, (x1, y1), (x2, y2), (0, 255, 0), 3)
+
+        # cv.imshow('image', image)
+        # cv.waitKey(0)
+        return im_plot
     
     def normalize(self, image):
         return image.astype(np.float32) / image.max()
@@ -142,7 +175,8 @@ class Dataloader(object):
             bboxes = []
             for line in open(gt_path):
                 bbox = line.rstrip('\n').split(',')
-                bbox = np.array(map(float, bbox), dtype=np.int32).reshape((-1, 2))
+                bbox = np.array(bbox, np.float32)
+                bbox = np.array(bbox, dtype=np.int32).reshape((-1, 2))
                 bboxes.append(bbox)
 
             data = []
@@ -167,7 +201,7 @@ class Dataloader(object):
         return len(self.dataset)
             
 def main(argv):
-    d = Dataloader(argv[1], 'list.txt', (224, 224, 3))
+    d = Dataloader(argv[1], 'list.txt', (448, 448, 3))
 
 
     for i in range(10):
