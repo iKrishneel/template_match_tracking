@@ -23,7 +23,7 @@ from mrcnn import model as modellib, utils
 class Network(object):
 
     def __init__(self, model_path=None, log_dir=None):
-        self.__iou_thresh = 0.60
+        self.__iou_thresh = 0.50
         self.__session = K.get_session()
 
         # load the mask rcnn model
@@ -56,8 +56,7 @@ class Network(object):
         # max_iou, max_index = self.get_overlapping_rois(bb_templ, templ_rois, True)
 
         while True:
-
-            datum = dataloader.load()
+            datum = dataloader.load(verbose=verbose, use_random=False)
         
             im_templ = datum['templ']
             bb_templ = datum['templ_bbox']
@@ -76,25 +75,26 @@ class Network(object):
                 print ('SEEMS NOTHING IS FOUND...')
                 sys.exit()
 
+        # propagate the src image
         src_rois, src_feats = self.forward(image)
-                
-        # tile the feature of the template roi
-        # max_index = max_index[0]
-        templ_feat = templ_feats[:, max_index]
-        # templ_feat = tf.expand_dims(templ_feat, 0)
-        templ_feat = np.expand_dims(templ_feat, 0)
-        # templ_feats = tf.tile(templ_feat, (1,src_feats.shape[1], 1, 1, 1))
-        templ_feats = np.tile(templ_feat, (1, src_feats.shape[1], 1, 1, 1))
 
-        # concate the features
-        # src_feats = tf.convert_to_tensor(src_feats)
-        # inputs_concat = L.concatenate([templ_feats[0], src_feats[0]], axis=-1, name='concate')
-        inputs_concat = np.concatenate((templ_feats[0], src_feats[0]), axis=-1)
-
+        top_k = 20
         # generate labels
-        # labels = self.label(bbox, src_rois)
-        labels = self.label2(bbox, src_rois)
+        labels, indices = self.label2(bbox, src_rois, top_k)
 
+        # select the features
+        if top_k is not None and indices is not None:
+            src_feats = src_feats[0, :][indices]
+            src_feats = np.expand_dims(src_feats, 0)
+        
+        # tile the feature of the template roi
+        templ_feat = templ_feats[:, max_index]
+        templ_feat = np.expand_dims(templ_feat, 0)
+        templ_feats = np.tile(templ_feat, (1, src_feats.shape[1], 1, 1, 1))
+        
+        # concate the features
+        inputs_concat = np.concatenate((templ_feats[0], src_feats[0]), axis=-1)
+        
         if verbose:
             y1,x1,y2,x2 = templ_rois[0][max_index] * self.__input_shape[0]
             im_templ = cv.rectangle(im_templ, (x1, y1), (x2, y2), (255, 0, 0), 3)
@@ -123,18 +123,27 @@ class Network(object):
         
         return Model(inputs = input_data, outputs = x)
 
-    def label2(self, gt_box, src_rois):
+    def label2(self, gt_box, src_rois, k=None):
         """ function to generate the labels """
         overlaps = self.get_overlapping_rois2(gt_box, src_rois, ret_max=False)
-        # gt_labels = tf.greater(overlaps, self.__iou_thresh)
-        gt_labels = np.greater(overlaps, self.__iou_thresh)
-        # gt_labels = self.__session.run(gt_labels)
+
+        indices = None
+        if k is None:
+            gt_labels = np.greater(overlaps, self.__iou_thresh)
+        else:
+            indices = np.argsort(overlaps[:, 0])[-k:]
+            gt_labels = overlaps[:, 0][indices]
+            gt_labels = np.greater(gt_labels, self.__iou_thresh)
+            gt_labels = np.expand_dims(gt_labels, 1)
+            
         gt_labels = gt_labels.astype(np.int0)
-        # gt_labels = tf.expand_dims(tf.expand_dims(gt_labels, 1), 1)
         gt_labels = np.tile(gt_labels, (1, 2))
         gt_labels[:, 0] = 0
         gt_labels = np.expand_dims(np.expand_dims(gt_labels, 1), 1)
-        return gt_labels
+        return gt_labels, indices
+
+
+        print (gt_labels)
         
     def get_overlapping_rois2(self, bbox, rpn_rois, ret_max=True):
         x1, y1, x2, y2 = bbox/self.__input_shape[0]
@@ -259,7 +268,9 @@ def main(argv):
     net = Network()
 
     loader = Dataloader('/home/krishneel/Documents/datasets/vot/vot2014/', 'list.txt', net.get_input_shape)
-    model = net.build(loader)
+
+    for i in range(5):
+        model = net.build(loader, verbose=True)
     # print(model.summary())
 
     # mask_rcnn_rpn(argv[1])

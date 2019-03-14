@@ -28,14 +28,16 @@ class Dataloader(object):
 
         self.input_shape = tuple(input_shape[:2])
         
-    def load(self, index=None, verbose=False):        
+    def load(self, index=None, use_random=True, verbose=False):        
 
         # object index
         index = self.random_index() if index is None else index
+        idx = random.randint(0, len(self.dataset[index])-1) if not use_random else None
+        
         # load target
-        image, bbox = self.process(index)
+        image, bbox = self.process(index, idx)
         # load template
-        im_templ, bbox_templ = self.process(index)
+        im_templ, bbox_templ = self.process(index, idx)
 
         # templ none object pixel set to zero
         x1,y1,x2,y2 = bbox_templ
@@ -58,23 +60,21 @@ class Dataloader(object):
             a = self.plot(image, bbox)
             b = self.plot(im_templ, bbox_templ)
             cv.imshow('img', np.hstack([a, b]))
-
             print (bbox_templ)
+            
         return dict(templ=im_templ, templ_bbox=bbox_templ, image=image, bbox=bbox)
 
 
-    def process(self, index):
-        image, bbox = self.load_data(index)
+    def process(self, index, idx):
+        image, bbox = self.load_data(index, idx)
         image, bbox = self.resize_image_and_labels(image, bbox)        
         image, bbox = self.color_space_argumentation(image, bbox)    
-        # image = self.normalize(image)
         return image, bbox
 
-    def load_data(self, index):
-        idx = random.randint(0, len(self.dataset[index])-1)
+    def load_data(self, index, idx):
+        idx = random.randint(0, len(self.dataset[index])-1) if idx is None else idx
         im_path = self.dataset[index][idx]['im_path']
         image = cv.imread(im_path, cv.IMREAD_COLOR)
-        # bounding box
         bbox = self.dataset[index][idx]['bbox']
         return image, bbox
 
