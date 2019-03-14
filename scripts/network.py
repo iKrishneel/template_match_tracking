@@ -15,21 +15,31 @@ from keras import layers as L
 from dataloader import Dataloader
 from iou import JaccardCoeff
 
+ROOT_DIR = os.path.join(os.path.dirname(os.path.realpath(__file__)), 'mask_rcnn')
+sys.path.append(ROOT_DIR)
+from mrcnn.config import Config
+from mrcnn import model as modellib, utils
+
 class Network(object):
 
-    def __init__(self):
+    def __init__(self, model_path=None, log_dir=None):
         self.__iou_thresh = 0.60
         self.__session = K.get_session()
 
         # load the mask rcnn model
         model_dir = os.path.join(os.path.dirname(os.path.realpath(__file__)), '../models')
         model_path = os.path.join(model_dir, 'mask_rcnn_coco.h5')
-        self.__mrcnn_model, self.__rpn_model, self.__input_shape = mask_rcnn_rpn(model_path)
+        self.__mrcnn_model, self.__rpn_model, self.__input_shape = self.mask_rcnn_rpn(model_path, log_dir)
+
+        self.__rpn_model._make_predict_function()
 
         # dont train this model
         self.__mrcnn_model.trainable = False
 
+        self.__counter = 0
+
     def build(self, dataloader, verbose=False):
+        """
         datum = dataloader.load()
         
         im_templ = datum['templ']
@@ -38,28 +48,52 @@ class Network(object):
         bbox = datum['bbox']
 
         # propagate through the network to obtain rois and features of the rois
-        templ_rois, templ_feats = forward(self.__mrcnn_model, self.__rpn_model, im_templ)
-        src_rois, src_feats = forward(self.__mrcnn_model, self.__rpn_model, image)
-
+        templ_rois, templ_feats = self.forward(im_templ)
+        src_rois, src_feats = self.forward(image)
+        """
+        
         # compute the feature of the roi that covers the template region
-        max_iou, max_index = self.get_overlapping_rois(bb_templ, templ_rois, True)
+        # max_iou, max_index = self.get_overlapping_rois(bb_templ, templ_rois, True)
 
-        if max_iou < self.__iou_thresh:
-            # todo: select another image
-            return
+        while True:
 
+            datum = dataloader.load()
+        
+            im_templ = datum['templ']
+            bb_templ = datum['templ_bbox']
+            image = datum['image']
+            bbox = datum['bbox']
+
+            # propagate through the network to obtain rois and features of the rois
+            templ_rois, templ_feats = self.forward(im_templ)
+
+            max_iou, max_index = self.get_overlapping_rois2(bb_templ, templ_rois, True)
+            if max_iou >= self.__iou_thresh:
+                self.__counter = 0
+                break
+            self.__counter += 1
+            if self.__counter == 100:
+                print ('SEEMS NOTHING IS FOUND...')
+                sys.exit()
+
+        src_rois, src_feats = self.forward(image)
+                
         # tile the feature of the template roi
-        max_index = max_index[0]
+        # max_index = max_index[0]
         templ_feat = templ_feats[:, max_index]
-        templ_feat = tf.expand_dims(templ_feat, 0)
-        templ_feats = tf.tile(templ_feat, (1,src_feats.shape[1], 1, 1, 1))
+        # templ_feat = tf.expand_dims(templ_feat, 0)
+        templ_feat = np.expand_dims(templ_feat, 0)
+        # templ_feats = tf.tile(templ_feat, (1,src_feats.shape[1], 1, 1, 1))
+        templ_feats = np.tile(templ_feat, (1, src_feats.shape[1], 1, 1, 1))
 
         # concate the features
-        src_feats = tf.convert_to_tensor(src_feats)
-        inputs_concat = L.concatenate([templ_feats[0], src_feats[0]], axis=-1, name='concate')
+        # src_feats = tf.convert_to_tensor(src_feats)
+        # inputs_concat = L.concatenate([templ_feats[0], src_feats[0]], axis=-1, name='concate')
+        inputs_concat = np.concatenate((templ_feats[0], src_feats[0]), axis=-1)
 
         # generate labels
-        labels = self.label(bbox, src_rois)
+        # labels = self.label(bbox, src_rois)
+        labels = self.label2(bbox, src_rois)
 
         if verbose:
             y1,x1,y2,x2 = templ_rois[0][max_index] * self.__input_shape[0]
@@ -67,7 +101,7 @@ class Network(object):
             cv.imshow('tmp', im_templ)
             cv.waitKey(0)
 
-        print ([inputs_concat.shape, labels.shape])
+        # inputs_concat, labels = self.__session.run([inputs_concat, labels])
         return inputs_concat, labels
 
 
@@ -87,6 +121,47 @@ class Network(object):
         
         return Model(inputs = input_data, outputs = x)
 
+    def label2(self, gt_box, src_rois):
+        """ function to generate the labels """
+        overlaps = self.get_overlapping_rois2(gt_box, src_rois, ret_max=False)
+        # gt_labels = tf.greater(overlaps, self.__iou_thresh)
+        gt_labels = np.greater(overlaps, self.__iou_thresh)
+        # gt_labels = self.__session.run(gt_labels)
+        gt_labels = gt_labels.astype(np.int0)
+        # gt_labels = tf.expand_dims(tf.expand_dims(gt_labels, 1), 1)
+        gt_labels = np.expand_dims(np.expand_dims(gt_labels, 1), 1)
+        return gt_labels
+        
+    def get_overlapping_rois2(self, bbox, rpn_rois, ret_max=True):
+        x1, y1, x2, y2 = bbox/self.__input_shape[0]
+        gt_box = np.array([y1, x1, y2, x2], np.float32)
+        gt_box = np.expand_dims(gt_box, 0)
+        if ret_max:
+            return self.overlap2(gt_box, rpn_rois, ret_max)
+        return self.overlap2(gt_box, rpn_rois, ret_max)
+
+    def overlap2(self, boxes1, boxes2, ret_max):
+        b1 = np.tile(boxes1, (boxes2.shape[0], boxes2.shape[1], 1))
+        b2 = boxes2
+        # 2. Compute import code; code.interact(local=locals())ersections
+        b1_y1, b1_x1, b1_y2, b1_x2 = np.split(b1, 4, axis=2)
+        b2_y1, b2_x1, b2_y2, b2_x2 = np.split(b2, 4, axis=2)
+        y1 = np.maximum(b1_y1, b2_y1)
+        x1 = np.maximum(b1_x1, b2_x1)
+        y2 = np.minimum(b1_y2, b2_y2)
+        x2 = np.minimum(b1_x2, b2_x2)
+        intersection = np.maximum(x2 - x1, 0) * np.maximum(y2 - y1, 0)
+        # 3. Compute unions
+        b1_area = (b1_y2 - b1_y1) * (b1_x2 - b1_x1)
+        b2_area = (b2_y2 - b2_y1) * (b2_x2 - b2_x1)
+        union = b1_area + b2_area - intersection
+        # 4. Compute IoU and reshape to [boxes1, boxes2]
+        iou = intersection / union
+        overlaps = iou[0] # np.reshape(iou, [np.shape(boxes1)[0], np.shape(boxes2)[0]])
+        if ret_max:
+            return np.max(overlaps), np.argmax(overlaps)
+        return overlaps
+
     def label(self, gt_box, src_rois):
         """ function to generate the labels """
         overlaps = self.get_overlapping_rois(gt_box, src_rois, ret_max=False)
@@ -95,8 +170,7 @@ class Network(object):
         gt_labels = self.__session.run(gt_labels)
         gt_labels = gt_labels.astype(np.int0)
         gt_labels = tf.expand_dims(tf.expand_dims(gt_labels, 1), 1)
-        return gt_labels
-        
+        return gt_labels       
     
     def get_overlapping_rois(self, bbox, rpn_rois, ret_max=True):
         x1, y1, x2, y2 = bbox/self.__input_shape[0]
@@ -109,7 +183,6 @@ class Network(object):
             max_iou, max_index = self.overlap(rois_tf, gt_box, ret_max)
             return self.__session.run([max_iou, max_index])
         return self.overlap(rois_tf, gt_box, ret_max)
-    
     
     def overlap(self, boxes1, boxes2, ret_max):
         b1 = tf.reshape(tf.tile(tf.expand_dims(boxes1, 1),
@@ -133,85 +206,49 @@ class Network(object):
         
         if ret_max:
             return tf.reduce_max(overlaps), tf.argmax(overlaps)
-            
         return overlaps
-
-        
-    
-    def network(self, input_shape):
-
-        act = 'relu'
-        pad = 'same'
-        
-        input_data = L.Input(shape=input_shape)
-        conv1_1 = L.Conv2D(32, (3, 3), activation=act, strides=(1, 1), padding=pad, name='conv1_1')(input_data)
-        conv1_2 = L.Conv2D(32, (3, 3), activation=act, strides=(2, 2), padding=pad, name='conv1_2')(conv1_1)
-        # pool1 = L.MaxPooling2D(pool_size=(2, 2), strides=(2, 2), padding='valid', name='pool1')(conv1_2)
-        bn1 = L.BatchNormalization(name='bn1')(conv1_2)
-        dp1 = L.Dropout(rate=0.5)(bn1)
-        pool1 = L.MaxPooling2D(pool_size=(2, 2), strides=(2, 2), padding='valid', name='pool1')(dp1)
-
-        conv2_1 = L.Conv2D(64, (3, 3), activation=act, strides=(2, 2), padding=pad, name='conv2_1')(pool1)
-        bn2 = L.BatchNormalization(name='bn2')(conv2_1)
-        dp2 = L.Dropout(rate=0.5)(bn2)
-
-        conv3_1 = L.Conv2D(128, (3, 3), activation=act, strides=(2, 2), padding = pad, name='conv3_1')(dp2)
-        bn3 = L.BatchNormalization(name='bn3')(conv3_1)
-        dp3 = L.Dropout(rate=0.5)(bn3)
-
-        conv4_1 = L.Conv2D(256, (3, 3), activation=act, strides=(1, 1), padding = pad, name='conv4_1')(dp3)
-        
-        conv5_1 = L.Conv2D(64, (1, 1), activation=act, strides=(1, 1), padding = pad, name='conv5_1')(conv4_1)
-
-        return Model(inputs = input_data, outputs = conv5_1)
 
     @property
     def get_input_shape(self):
         return self.__input_shape
 
+    def forward(self, image):
+        molded_image, image_meta, window = self.__mrcnn_model.mold_inputs([image])
+        anchors = self.__mrcnn_model.get_anchors(molded_image[0].shape)
+        anchors = np.broadcast_to(anchors, (1,) + anchors.shape)    
+        rois_output, rpn_output = self.__rpn_model.predict([molded_image, image_meta, anchors], verbose=0)
+        return rois_output, rpn_output
+    
+    def mask_rcnn_rpn(self, model_path, log_dir=None):
+    
+        assert os.path.isfile(model_path), 'Pretrained MASK_RCNN weights not found at: {}'.format(model_path)
+    
+        log_dir = os.path.join(os.environ['HOME'], '.ros/logs') if log_dir is None else log_dir
+    
+        print('Initializing the Mask RCNN model')
+    
+        class InferenceConfig(Config):
+            # Give the configuration a recognizable name
+            NAME = "handheld_objects"
+            GPU_COUNT = 1
+            IMAGES_PER_GPU = 1
+            DETECTION_MIN_CONFIDENCE = 0
+            NUM_CLASSES = 81
+            IMAGE_MIN_DIM = 224
+            IMAGE_MAX_DIM = 448
 
-def forward(mrcnn_model, rpn_model, image):
-    molded_image, image_meta, window = mrcnn_model.mold_inputs([image])
-    anchors = mrcnn_model.get_anchors(molded_image[0].shape)
-    anchors = np.broadcast_to(anchors, (1,) + anchors.shape)    
-    rois_output, rpn_output = rpn_model.predict([molded_image, image_meta, anchors], verbose=0)
-    return rois_output, rpn_output
+        config = InferenceConfig()
+        config.display()
     
-def mask_rcnn_rpn(model_path, log_dir=None):
-    
-    assert os.path.isfile(model_path), 'Pretrained MASK_RCNN weights not found at: {}'.format(model_path)
-    
-    ROOT_DIR = os.path.join(os.path.dirname(os.path.realpath(__file__)), 'mask_rcnn')
-    sys.path.append(ROOT_DIR)
-    from mrcnn.config import Config
-    from mrcnn import model as modellib, utils
-    
-    log_dir = os.path.join(os.environ['HOME'], '.ros/logs') if log_dir is None else log_dir
-    
-    print('Initializing the Mask RCNN model')
-    
-    class InferenceConfig(Config):
-        # Give the configuration a recognizable name
-        NAME = "handheld_objects"
-        GPU_COUNT = 1
-        IMAGES_PER_GPU = 1
-        DETECTION_MIN_CONFIDENCE = 0
-        NUM_CLASSES = 81
-        IMAGE_MIN_DIM = 224
-        IMAGE_MAX_DIM = 448
+        mrcnn_model = modellib.MaskRCNN(mode='inference', config=config, model_dir=log_dir)
+        mrcnn_model.load_weights(model_path, by_name=True)
 
-    config = InferenceConfig()
-    config.display()
-    
-    mrcnn_model = modellib.MaskRCNN(mode='inference', config=config, model_dir=log_dir)
-    mrcnn_model.load_weights(model_path, by_name=True)
-
-    layer_name=['ROI', 'roi_align_classifier']
-    model = mrcnn_model.keras_model
-    rpn_model = Model(inputs=model.input, outputs=[model.get_layer(layer_name[0]).output, \
+        layer_name=['ROI', 'roi_align_classifier']
+        model = mrcnn_model.keras_model
+        rpn_model = Model(inputs=model.input, outputs=[model.get_layer(layer_name[0]).output, \
                                                    model.get_layer(layer_name[1]).output])
-    print('Model is successfully initialized!')
-    return mrcnn_model, rpn_model, (config.IMAGE_SHAPE)
+        print('Model is successfully initialized!')
+        return mrcnn_model, rpn_model, (config.IMAGE_SHAPE)
         
 
 def main(argv):

@@ -64,7 +64,7 @@ class Trainer(object):
 
         self.__lrate = 0.001
         optimizer = Adam(lr = self.__lrate, beta_1=0.9, beta_2=0.999, epsilon=None, decay=0.0, amsgrad=False)
-        self.model.compile(loss='binary_crossentropy', optimizer=optimizer, metric=['accuracy'])
+        self.model.compile(loss='binary_crossentropy', optimizer=optimizer)
 
         self.generator = DataGenerator(self.network, self.dataloader, 1)
 
@@ -88,16 +88,14 @@ class Trainer(object):
         self.model.fit_generator(
             self.generator,
             initial_epoch = self.initial_epoch,
-            epochs = 1,
-            steps_per_epoch = 10,
+            epochs = 100,
+            steps_per_epoch = 1000,
             callbacks = cb_handles,
             max_queue_size = 100,
-            workers = num_workers,
-            use_multiprocessing = True,
+            workers = 1,
+            use_multiprocessing = False,
             verbose = 1,
         )
-        
-
         
         
         
