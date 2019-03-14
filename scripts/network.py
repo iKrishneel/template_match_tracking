@@ -38,7 +38,7 @@ class Network(object):
 
         self.__counter = 0
 
-    def build(self, dataloader, verbose=False):
+    def build(self, dataloader, is_test=False, verbose=False):
         """
         datum = dataloader.load()
         
@@ -102,6 +102,8 @@ class Network(object):
             cv.waitKey(0)
 
         # inputs_concat, labels = self.__session.run([inputs_concat, labels])
+        if is_test:
+            return inputs_concat, labels, src_rois, image
         return inputs_concat, labels
 
 
@@ -117,7 +119,7 @@ class Network(object):
         x = L.Conv2D(512, (3, 3), activation=act, strides=(3, 3), padding=pad)(x)
         x = L.BatchNormalization()(x)
         x = L.Dropout(rate=0.5)(x)
-        x = L.Conv2D(1, (3, 3), activation='sigmoid', strides=(3, 3), padding=pad, name='classifier')(x)
+        x = L.Conv2D(2, (3, 3), activation='sigmoid', strides=(3, 3), padding=pad, name='classifier')(x)
         
         return Model(inputs = input_data, outputs = x)
 
@@ -129,6 +131,8 @@ class Network(object):
         # gt_labels = self.__session.run(gt_labels)
         gt_labels = gt_labels.astype(np.int0)
         # gt_labels = tf.expand_dims(tf.expand_dims(gt_labels, 1), 1)
+        gt_labels = np.tile(gt_labels, (1, 2))
+        gt_labels[:, 0] = 0
         gt_labels = np.expand_dims(np.expand_dims(gt_labels, 1), 1)
         return gt_labels
         
