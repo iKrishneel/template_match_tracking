@@ -28,7 +28,7 @@ class Dataloader(object):
 
         self.input_shape = tuple(input_shape[:2])
         
-    def load(self, index=None, use_random=True, use_aug=True):        
+    def load(self, index=None, verbose=False):        
 
         # object index
         index = self.random_index() if index is None else index
@@ -54,12 +54,12 @@ class Dataloader(object):
         im_templ[:, x2:] = 0
         im_templ[y2:, :] = 0
 
-        a = self.plot(image, bbox)
-        b = self.plot(im_templ, bbox_templ)
-        cv.imshow('img', np.hstack([a, b]))
-        # cv.waitKey(0)
+        if verbose:
+            a = self.plot(image, bbox)
+            b = self.plot(im_templ, bbox_templ)
+            cv.imshow('img', np.hstack([a, b]))
 
-        print (bbox_templ)
+            print (bbox_templ)
         return dict(templ=im_templ, templ_bbox=bbox_templ, image=image, bbox=bbox)
 
 

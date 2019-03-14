@@ -16,72 +16,102 @@ from dataloader import Dataloader
 from iou import JaccardCoeff
 
 class Network(object):
-    
-    def build(self, input_shape):
 
-        assert len(input_shape) is 3 and isinstance(input_shape, tuple),\
-        'input_shape given is: {} but expects tuple '.format(type(input_shape))
+    def __init__(self):
+        self.__iou_thresh = 0.60
+        self.__session = K.get_session()
 
         # load the mask rcnn model
         model_dir = os.path.join(os.path.dirname(os.path.realpath(__file__)), '../models')
         model_path = os.path.join(model_dir, 'mask_rcnn_coco.h5')
-        mrcnn_model, rpn_model, input_shape = mask_rcnn_rpn(model_path)
+        self.__mrcnn_model, self.__rpn_model, self.__input_shape = mask_rcnn_rpn(model_path)
 
         # dont train this model
-        mrcnn_model.trainable = False
+        self.__mrcnn_model.trainable = False
 
-        loader = Dataloader('/home/krishneel/Documents/datasets/vot/vot2014/', 'list.txt', input_shape)
-        datum = loader.load()
+    def build(self, dataloader, verbose=False):
+        datum = dataloader.load()
         
         im_templ = datum['templ']
         bb_templ = datum['templ_bbox']
         image = datum['image']
         bbox = datum['bbox']
 
-        templ_rois, templ_feats = forward(mrcnn_model, rpn_model, im_templ)
+        # propagate through the network to obtain rois and features of the rois
+        templ_rois, templ_feats = forward(self.__mrcnn_model, self.__rpn_model, im_templ)
+        src_rois, src_feats = forward(self.__mrcnn_model, self.__rpn_model, image)
 
+        # compute the feature of the roi that covers the template region
+        max_iou, max_index = self.get_overlapping_rois(bb_templ, templ_rois, True)
+
+        if max_iou < self.__iou_thresh:
+            # todo: select another image
+            return
+
+        # tile the feature of the template roi
+        max_index = max_index[0]
+        templ_feat = templ_feats[:, max_index]
+        templ_feat = tf.expand_dims(templ_feat, 0)
+        templ_feats = tf.tile(templ_feat, (1,src_feats.shape[1], 1, 1, 1))
+
+        # concate the features
+        src_feats = tf.convert_to_tensor(src_feats)
+        inputs_concat = L.concatenate([templ_feats[0], src_feats[0]], axis=-1, name='concate')
+
+        # generate labels
+        labels = self.label(bbox, src_rois)
+
+        if verbose:
+            y1,x1,y2,x2 = templ_rois[0][max_index] * self.__input_shape[0]
+            im_templ = cv.rectangle(im_templ, (x1, y1), (x2, y2), (255, 0, 0), 3)
+            cv.imshow('tmp', im_templ)
+            cv.waitKey(0)
+
+        print ([inputs_concat.shape, labels.shape])
+        return inputs_concat, labels
+
+
+    def auxillary_network(self, input_shape):
+        """ create auxillary trainable network at the head """
+
+        act = 'relu'
+        pad = 'same'
+        input_data = L.Input(shape=input_shape, name='input')
+        x = L.Conv2D(512, (1, 1), activation=act, strides=(1, 1), padding=pad)(input_data)
+        x = L.BatchNormalization()(x)
+        x = L.Dropout(rate=0.5)(x)
+        x = L.Conv2D(512, (3, 3), activation=act, strides=(3, 3), padding=pad)(x)
+        x = L.BatchNormalization()(x)
+        x = L.Dropout(rate=0.5)(x)
+        x = L.Conv2D(1, (3, 3), activation='sigmoid', strides=(3, 3), padding=pad, name='classifier')(x)
         
-        print ('Shape: {}'.format([im_templ.shape]))
-        jc = JaccardCoeff()
-        x1,y1,x2,y2 = bb_templ
-        r1 = np.array([x1, y1, x2-x1, y2-y1], dtype=np.int0)
+        return Model(inputs = input_data, outputs = x)
+
+    def label(self, gt_box, src_rois):
+        """ function to generate the labels """
+        overlaps = self.get_overlapping_rois(gt_box, src_rois, ret_max=False)
+        gt_labels = tf.greater(overlaps, self.__iou_thresh)
+
+        gt_labels = self.__session.run(gt_labels)
+        gt_labels = gt_labels.astype(np.int0)
+        gt_labels = tf.expand_dims(tf.expand_dims(gt_labels, 1), 1)
+        return gt_labels
         
-        max_rect, max_iou, max_index = None, 0, -1
-        for i, tr in enumerate(templ_rois[0, :]):
-            y1,x1,y2,x2 = tr * input_shape[0]
-            r2 = np.array([x1, y1, x2-x1, y2-y1], np.int0)
-
-            iou_score = jc.iou(r1, r2)
-            if iou_score > max_iou:
-                max_iou = iou_score
-                max_rect = np.array([x1, y1, x2, y2], np.int0)
-                max_index = i
-
-        x1,y1,x2,y2 = max_rect
-        im_templ = cv.rectangle(im_templ, (x1, y1), (x2, y2), (255, 0, 0), 3)
-        print ([templ_rois.shape, templ_feats.shape, max_iou, max_index])
-        print ([input_shape, max_rect, bb_templ])
-        
-        cv.imshow('tmp', im_templ)
-
-        # compute iou scores
-        x1, y1, x2, y2 = bb_templ/input_shape[0]
+    
+    def get_overlapping_rois(self, bbox, rpn_rois, ret_max=True):
+        x1, y1, x2, y2 = bbox/self.__input_shape[0]
         gt_box = np.array([y1, x1, y2, x2], np.float32)
         gt_box = np.expand_dims(gt_box, 0)
         gt_box = tf.convert_to_tensor(gt_box)
-        templ_rois = tf.convert_to_tensor(templ_rois[0])
+        rois_tf = tf.convert_to_tensor(rpn_rois[0])
 
-        max_iou, max_index = self.overlap(templ_rois, gt_box, ret_max=True)
-        
-        sess = tf.Session()
-        print ([sess.run(max_iou), sess.run(max_index)])
-        
-        cv.waitKey(0)
-        return
-        
-
+        if ret_max:
+            max_iou, max_index = self.overlap(rois_tf, gt_box, ret_max)
+            return self.__session.run([max_iou, max_index])
+        return self.overlap(rois_tf, gt_box, ret_max)
     
-    def overlap(self, boxes1, boxes2, ret_max=False):
+    
+    def overlap(self, boxes1, boxes2, ret_max):
         b1 = tf.reshape(tf.tile(tf.expand_dims(boxes1, 1),
                                 [1, 1, tf.shape(boxes2)[0]]), [-1, 4])
         b2 = tf.tile(boxes2, [tf.shape(boxes1)[0], 1])
@@ -102,12 +132,11 @@ class Network(object):
         overlaps = tf.reshape(iou, [tf.shape(boxes1)[0], tf.shape(boxes2)[0]])
         
         if ret_max:
-            return tf.argmax(overlaps), tf.reduce_max(overlaps)
+            return tf.reduce_max(overlaps), tf.argmax(overlaps)
             
         return overlaps
 
         
-
     
     def network(self, input_shape):
 
@@ -136,6 +165,9 @@ class Network(object):
 
         return Model(inputs = input_data, outputs = conv5_1)
 
+    @property
+    def get_input_shape(self):
+        return self.__input_shape
 
 
 def forward(mrcnn_model, rpn_model, image):
@@ -184,7 +216,9 @@ def mask_rcnn_rpn(model_path, log_dir=None):
 
 def main(argv):
     net = Network()
-    model = net.build((112,112,3))
+
+    loader = Dataloader('/home/krishneel/Documents/datasets/vot/vot2014/', 'list.txt', net.get_input_shape)
+    model = net.build(loader)
     # print(model.summary())
 
     # mask_rcnn_rpn(argv[1])
