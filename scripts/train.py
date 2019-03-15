@@ -62,9 +62,9 @@ class Trainer(object):
             self.__log_dir = log_dir2
 
 
-        self.__lrate = 0.001
+        self.__lrate = 1e-4
         optimizer = Adam(lr = self.__lrate, beta_1=0.9, beta_2=0.999, epsilon=None, decay=0.0, amsgrad=False)
-        self.model.compile(loss='binary_crossentropy', optimizer=optimizer)
+        self.model.compile(loss='binary_crossentropy', optimizer=optimizer, loss_weights=[100])
 
         self.generator = DataGenerator(self.network, self.dataloader, 1)
 
@@ -88,17 +88,22 @@ class Trainer(object):
         self.model.fit_generator(
             self.generator,
             initial_epoch = self.initial_epoch,
-            epochs = 100,
+            epochs = 120,
             steps_per_epoch = 1000,
             callbacks = cb_handles,
-            max_queue_size = 100,
+            max_queue_size = 10,
             workers = 1,
             use_multiprocessing = False,
             verbose = 1,
         )
         
         
-        
-        
-t = Trainer('/home/krishneel/Documents/datasets/vot/vot2014/', 'logs')
-t.train()
+def main(argv):
+    model_weight = None
+    if len(argv) > 1:
+        model_weight = argv[1]
+    t = Trainer('/home/krishneel/Documents/datasets/vot/vot2014/', 'logs', model_weight)
+    t.train()
+
+if __name__ == '__main__':
+    main(sys.argv)

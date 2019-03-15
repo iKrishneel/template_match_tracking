@@ -5,7 +5,7 @@ import os
 import sys
 import numpy as np
 import cv2 as cv
-
+import random
 
 import tensorflow as tf
 from keras import backend as K
@@ -23,7 +23,7 @@ from mrcnn import model as modellib, utils
 class Network(object):
 
     def __init__(self, model_path=None, log_dir=None):
-        self.__iou_thresh = 0.50
+        self.__iou_thresh = 0.04
         self.__session = K.get_session()
 
         # load the mask rcnn model
@@ -78,7 +78,7 @@ class Network(object):
         # propagate the src image
         src_rois, src_feats = self.forward(image)
 
-        top_k = 20
+        top_k = None # random.randint(20, src_rois.shape[1])
         # generate labels
         labels, indices = self.label2(bbox, src_rois, top_k)
 
@@ -96,10 +96,11 @@ class Network(object):
         inputs_concat = np.concatenate((templ_feats[0], src_feats[0]), axis=-1)
         
         if verbose:
+            print('RPN SIZE: {}'.format(templ_rois.shape))
             y1,x1,y2,x2 = templ_rois[0][max_index] * self.__input_shape[0]
             im_templ = cv.rectangle(im_templ, (x1, y1), (x2, y2), (255, 0, 0), 3)
             cv.imshow('tmp', im_templ)
-            cv.waitKey(0)
+            cv.waitKey(3)
 
         # inputs_concat, labels = self.__session.run([inputs_concat, labels])
         if is_test:
@@ -119,7 +120,7 @@ class Network(object):
         x = L.Conv2D(512, (3, 3), activation=act, strides=(3, 3), padding=pad)(x)
         x = L.BatchNormalization()(x)
         x = L.Dropout(rate=0.5)(x)
-        x = L.Conv2D(2, (3, 3), activation='sigmoid', strides=(3, 3), padding=pad, name='classifier')(x)
+        x = L.Conv2D(1, (3, 3), activation='sigmoid', strides=(3, 3), padding=pad, name='classifier')(x)
         
         return Model(inputs = input_data, outputs = x)
 
@@ -137,13 +138,10 @@ class Network(object):
             gt_labels = np.expand_dims(gt_labels, 1)
             
         gt_labels = gt_labels.astype(np.int0)
-        gt_labels = np.tile(gt_labels, (1, 2))
-        gt_labels[:, 0] = 0
+        # gt_labels = np.tile(gt_labels, (1, 2))
+        # gt_labels[:, 0] = 0
         gt_labels = np.expand_dims(np.expand_dims(gt_labels, 1), 1)
         return gt_labels, indices
-
-
-        print (gt_labels)
         
     def get_overlapping_rois2(self, bbox, rpn_rois, ret_max=True):
         x1, y1, x2, y2 = bbox/self.__input_shape[0]
@@ -249,6 +247,7 @@ class Network(object):
             NUM_CLASSES = 81
             IMAGE_MIN_DIM = 224
             IMAGE_MAX_DIM = 448
+            # POST_NMS_ROIS_INFERENCE = 256
 
         config = InferenceConfig()
         config.display()
@@ -269,7 +268,7 @@ def main(argv):
 
     loader = Dataloader('/home/krishneel/Documents/datasets/vot/vot2014/', 'list.txt', net.get_input_shape)
 
-    for i in range(5):
+    for i in range(100):
         model = net.build(loader, verbose=True)
     # print(model.summary())
 

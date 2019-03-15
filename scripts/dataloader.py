@@ -35,40 +35,52 @@ class Dataloader(object):
         idx = random.randint(0, len(self.dataset[index])-1) if not use_random else None
         
         # load target
-        image, bbox = self.process(index, idx)
+        image, bbox = self.process(index, idx, False)
         # load template
-        im_templ, bbox_templ = self.process(index, idx)
+        im_templ, bbox_templ = self.process(index, idx, False)
 
         # templ none object pixel set to zero
+        """
         x1,y1,x2,y2 = bbox_templ
         pad_x, pad_y = np.array([(x2-x1)/2, (y2-y1)/2], dtype=np.int32)
-        # pad_x, pad_y = 0, 0
+        pad_x, pad_y = 0, 0
         
         x1 = 0 if x1-pad_x < 0 else x1-pad_x
         y1 = 0 if y1-pad_y < 0 else y1-pad_y
         x2 = im_templ.shape[1] if x2+pad_x > im_templ.shape[1] else x2+pad_x
         y2 = im_templ.shape[0] if y2+pad_y > im_templ.shape[1] else y2+pad_y
+        """
+        
+        factor = 4
+        bbox_templ = self.enlarge_bbox(bbox_templ, im_templ.shape, factor)
+        bbox = self.enlarge_bbox(bbox, image.shape, factor)        
+        x1,y1,x2,y2 = bbox_templ
 
+        # mask out pixel outside the region
         im_templ[:, 0:x1] = 0
         im_templ[0:y1, 0:x1] = 0
         im_templ[0:y1, :] = 0
         im_templ[y2:, x2:] = 0
         im_templ[:, x2:] = 0
         im_templ[y2:, :] = 0
-
+        
         if verbose:
             a = self.plot(image, bbox)
             b = self.plot(im_templ, bbox_templ)
             cv.imshow('img', np.hstack([a, b]))
-            print (bbox_templ)
             
         return dict(templ=im_templ, templ_bbox=bbox_templ, image=image, bbox=bbox)
 
 
-    def process(self, index, idx):
+    def process(self, index, idx, use_aug=True):
         image, bbox = self.load_data(index, idx)
-        image, bbox = self.resize_image_and_labels(image, bbox)        
-        image, bbox = self.color_space_argumentation(image, bbox)    
+        image, bbox = self.resize_image_and_labels(image, bbox)
+        if use_aug:
+            image, bbox = self.color_space_argumentation(image, bbox)
+        else:
+            x1, x2 = np.min(bbox[:, 0]), np.max(bbox[:, 0])
+            y1, y2 = np.min(bbox[:, 1]), np.max(bbox[:, 1])
+            bbox = np.array([x1, y1, x2, y2], dtype=np.int0)
         return image, bbox
 
     def load_data(self, index, idx):
@@ -92,8 +104,15 @@ class Dataloader(object):
         # cv.waitKey(0)
         return im_plot
     
-    def normalize(self, image):
-        return image.astype(np.float32) / image.max()
+    def enlarge_bbox(self, bbox, image_shape, factor=2):
+        x1,y1,x2,y2 = bbox
+        pad_x, pad_y = np.array([(x2-x1)/factor, (y2-y1)/factor], dtype=np.int32)
+        
+        x1 = 0 if x1-pad_x < 0 else x1-pad_x
+        y1 = 0 if y1-pad_y < 0 else y1-pad_y
+        x2 = image_shape[1] if x2+pad_x > image_shape[1] else x2+pad_x
+        y2 = image_shape[0] if y2+pad_y > image_shape[1] else y2+pad_y
+        return np.array([x1, y1, x2, y2], np.int0)
 
     def resize_image_and_labels(self, image, bbox):
         img = cv.resize(image, self.input_shape[:2], cv.INTER_CUBIC)
