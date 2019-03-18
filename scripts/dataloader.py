@@ -34,15 +34,15 @@ class Dataloader(object):
 
         # object index
         index = self.random_index() if index is None else index
-        idx = random.randint(0, len(self.dataset[index])-1) if not use_random else None
-        # idx = self.idx if not use_random else None
+        # idx = random.randint(0, len(self.dataset[index])-1) if not use_random else None
+        idx = self.idx if not use_random else None
 
         # load target
         image, bbox = self.process(index, idx, False)
         # load template
         im_templ, bbox_templ = self.process(index, idx, False)
 
-        # self.idx = 0 if idx + 1 > len(self.dataset[index])-1 else idx+1
+        self.idx = 0 if idx + 1 > len(self.dataset[index])-1 else idx+1
         
         # templ none object pixel set to zero
         x1,y1,x2,y2 = bbox_templ
