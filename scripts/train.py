@@ -64,7 +64,7 @@ class Trainer(object):
 
         self.__lrate = 1e-4
         optimizer = Adam(lr = self.__lrate, beta_1=0.9, beta_2=0.999, epsilon=None, decay=0.0, amsgrad=False)
-        self.model.compile(loss='binary_crossentropy', optimizer=optimizer, loss_weights=[100])
+        self.model.compile(loss='binary_crossentropy', optimizer=optimizer, loss_weights=[10])
 
         self.generator = DataGenerator(self.network, self.dataloader, 1)
 

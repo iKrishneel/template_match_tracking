@@ -16,8 +16,7 @@ def test(dataset_dir, model_weights):
     model = network.auxillary_network(input_shape=(7, 7, 512))
     model.load_weights(model_weights, by_name=True)
 
-
-    for _ in range(20):
+    for _ in range(100):
         input_feats, labels, rois, image = network.build(dataloader, is_test=True, verbose=True)
         result = model.predict(input_feats)
         
@@ -28,7 +27,8 @@ def test(dataset_dir, model_weights):
         for i, r in enumerate(result):
             y1, x1, y2, x2 = rois[0, i]
             if r[0, 0, 0] > 0.5:
-                image = cv.rectangle(image, (x1, y1), (x2, y2), (0, 255, 0), 1)
+                # image = cv.rectangle(image, (x1, y1), (x2, y2), (0, 255, 0), 1)
+                pass
             else:
                 pass
                 # image = cv.rectangle(image, (x1, y1), (x2, y2), (0, 0, 255), 1)
@@ -38,7 +38,7 @@ def test(dataset_dir, model_weights):
         image = cv.rectangle(image, (x1, y1), (x2, y2), (255, 0, 127 ), 3)
         
         cv.imshow('result', image)
-        cv.waitKey(0)
+        cv.waitKey(3)
 
 def main(argv):
     test(argv[1], argv[2])

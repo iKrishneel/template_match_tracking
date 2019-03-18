@@ -27,20 +27,24 @@ class Dataloader(object):
         self.random_index = lambda: random.randint(0, len(self.dataset)-1)
 
         self.input_shape = tuple(input_shape[:2])
+
+        self.idx = 0
         
     def load(self, index=None, use_random=True, verbose=False):        
 
         # object index
         index = self.random_index() if index is None else index
         idx = random.randint(0, len(self.dataset[index])-1) if not use_random else None
-        
+        # idx = self.idx if not use_random else None
+
         # load target
         image, bbox = self.process(index, idx, False)
         # load template
         im_templ, bbox_templ = self.process(index, idx, False)
 
+        # self.idx = 0 if idx + 1 > len(self.dataset[index])-1 else idx+1
+        
         # templ none object pixel set to zero
-        """
         x1,y1,x2,y2 = bbox_templ
         pad_x, pad_y = np.array([(x2-x1)/2, (y2-y1)/2], dtype=np.int32)
         pad_x, pad_y = 0, 0
@@ -49,12 +53,14 @@ class Dataloader(object):
         y1 = 0 if y1-pad_y < 0 else y1-pad_y
         x2 = im_templ.shape[1] if x2+pad_x > im_templ.shape[1] else x2+pad_x
         y2 = im_templ.shape[0] if y2+pad_y > im_templ.shape[1] else y2+pad_y
+
         """
-        
         factor = 4
-        bbox_templ = self.enlarge_bbox(bbox_templ, im_templ.shape, factor)
-        bbox = self.enlarge_bbox(bbox, image.shape, factor)        
+        if factor is not 0:
+            bbox_templ = self.enlarge_bbox(bbox_templ, im_templ.shape, factor)
+            bbox = self.enlarge_bbox(bbox, image.shape, factor)        
         x1,y1,x2,y2 = bbox_templ
+        """
 
         # mask out pixel outside the region
         im_templ[:, 0:x1] = 0
