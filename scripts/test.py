@@ -27,7 +27,7 @@ def test(dataset_dir, model_weights):
         for i, r in enumerate(result):
             y1, x1, y2, x2 = rois[0, i]
             if r[0, 0, 0] > 0.5:
-                # image = cv.rectangle(image, (x1, y1), (x2, y2), (0, 255, 0), 1)
+                image = cv.rectangle(image, (x1, y1), (x2, y2), (0, 255, 0), 1)
                 pass
             else:
                 pass
