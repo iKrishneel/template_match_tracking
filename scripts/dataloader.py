@@ -224,6 +224,10 @@ class Dataloader(object):
     @property
     def get_datasize(self):
         return len(self.dataset)
+
+    @property
+    def get_dataset(self):
+        return self.dataset
             
 def main(argv):
     d = Dataloader(argv[1], 'list.txt', (448, 448, 3))

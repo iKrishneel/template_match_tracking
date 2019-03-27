@@ -39,22 +39,7 @@ class Network(object):
         self.__counter = 0
 
     def build(self, dataloader, is_test=False, verbose=False):
-        """
-        datum = dataloader.load()
         
-        im_templ = datum['templ']
-        bb_templ = datum['templ_bbox']
-        image = datum['image']
-        bbox = datum['bbox']
-
-        # propagate through the network to obtain rois and features of the rois
-        templ_rois, templ_feats = self.forward(im_templ)
-        src_rois, src_feats = self.forward(image)
-        """
-        
-        # compute the feature of the roi that covers the template region
-        # max_iou, max_index = self.get_overlapping_rois(bb_templ, templ_rois, True)
-
         while True:
             datum = dataloader.load(verbose=verbose, use_random=False)
         
@@ -108,6 +93,34 @@ class Network(object):
         return inputs_concat, labels
 
 
+    def base_net_forward(self, im_templ, bb_templ, image):
+
+        # propagate through the network to obtain rois and features of the rois
+        templ_rois, templ_feats = self.forward(im_templ)
+        max_iou, max_index = self.get_overlapping_rois2(bb_templ, templ_rois, True)
+
+        # propagate the src image
+        src_rois, src_feats = self.forward(image)
+
+        top_k = None # random.randint(20, src_rois.shape[1])
+        # generate labels
+        # labels, indices = self.label2(bbox, src_rois, top_k)
+
+        # select the features
+        # if top_k is not None and indices is not None:
+        #    src_feats = src_feats[0, :][indices]
+        #    src_feats = np.expand_dims(src_feats, 0)
+        
+        # tile the feature of the template roi
+        templ_feat = templ_feats[:, max_index]
+        templ_feat = np.expand_dims(templ_feat, 0)
+        templ_feats = np.tile(templ_feat, (1, src_feats.shape[1], 1, 1, 1))
+        
+        # concate the features
+        inputs_concat = np.concatenate((templ_feats[0], src_feats[0]), axis=-1)
+        return inputs_concat, src_rois
+
+    
     def auxillary_network(self, input_shape):
         """ create auxillary trainable network at the head """
 
